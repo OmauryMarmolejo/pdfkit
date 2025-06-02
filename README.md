@@ -43,6 +43,12 @@ file = kit.to_file('/path/to/save/pdf')
 kit = PDFKit.new('http://google.com')
 kit = PDFKit.new(File.new('/path/to/html'))
 
+# PDFKit can also accept multiple sources (HTML strings, URLs, or Files)
+# This allows you to combine multiple documents into a single PDF
+kit = PDFKit.new(['<h1>First page</h1>', '<h1>Second page</h1>'])
+kit = PDFKit.new(['http://google.com', 'http://yahoo.com'])
+kit = PDFKit.new([File.new('/path/to/html'), '<h1>Appended content</h1>'])
+
 # Add any kind of option through meta tags
 PDFKit.new('<html><head><meta name="pdfkit-page_size" content="Letter"')
 PDFKit.new('<html><head><meta name="pdfkit-cookie cookie_name1" content="cookie_value1"')

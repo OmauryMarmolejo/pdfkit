@@ -26,17 +26,20 @@ class PDFKit
     end
   end
 
-  attr_accessor :source, :stylesheets
+  attr_accessor :sources, :stylesheets
   attr_reader :renderer
 
   def initialize(url_file_or_html, options = {})
-    @source = Source.new(url_file_or_html)
+    @sources = []
+    url_file_or_html = [url_file_or_html] unless url_file_or_html.is_a? Array
+
+    url_file_or_html.each { |source| @sources << Source.new(source) }
 
     @stylesheets = []
 
     options = PDFKit.configuration.default_options.merge(options)
     options.delete(:quiet) if PDFKit.configuration.verbose?
-    options.merge! find_options_in_meta(url_file_or_html) unless source.url?
+    options.merge! find_options_in_meta(url_file_or_html) unless sources.any?(&:url?)
     @root_url = options.delete(:root_url)
     @protocol = options.delete(:protocol)
     @renderer = WkHTMLtoPDF.new options
@@ -48,7 +51,9 @@ class PDFKit
   def command(path = nil)
     args = [*executable]
     args.concat(@renderer.options_for_command)
-    args << @source.to_input_for_command
+    @sources.each do |source|
+      args << source.to_input_for_command
+    end
     args << (path ? path.to_s : '-')
     args
   end
@@ -69,7 +74,7 @@ class PDFKit
     invoke = command(path)
 
     result = IO.popen(invoke, "wb+") do |pdf|
-      pdf.puts(@source.to_s) if @source.html?
+      @sources.each { |source| pdf.puts(source.to_s) if source.html? }
       pdf.close_write
       pdf.gets(nil) if path.nil?
     end
@@ -85,26 +90,33 @@ class PDFKit
     File.new(path)
   end
 
+  def source
+    return @sources.first if @sources.length == 1
+    @sources
+  end
+
   protected
 
-  def find_options_in_meta(content)
+  def find_options_in_meta(contents)
     # Read file if content is a File
-    content = content.read if content.is_a?(File) || content.is_a?(Tempfile)
-
     found = {}
-    content.scan(/<meta [^>]*>/) do |meta|
-      if meta.match(/name=["']#{PDFKit.configuration.meta_tag_prefix}/)
-        name = meta.scan(/name=["']#{PDFKit.configuration.meta_tag_prefix}([^"']*)/)[0][0].split
-        found[name] = meta.scan(/content=["']([^"'\\]+)["']/)[0][0]
-      end
-    end
+    contents.each do |content|
+      content = content.read if content.is_a?(File) || content.is_a?(Tempfile)
 
-    tuple_keys = found.keys.select { |k| k.is_a? Array }
-    tuple_keys.each do |key|
-      value = found.delete key
-      new_key = key.shift
-      found[new_key] ||= {}
-      found[new_key][key] = value
+      content.scan(/<meta [^>]*>/) do |meta|
+        if meta.match(/name=["']#{PDFKit.configuration.meta_tag_prefix}/)
+          name = meta.scan(/name=["']#{PDFKit.configuration.meta_tag_prefix}([^"']*)/)[0][0].split
+          found[name] = meta.scan(/content=["']([^"'\\]+)["']/)[0][0]
+        end
+      end
+
+      tuple_keys = found.keys.select { |k| k.is_a? Array }
+      tuple_keys.each do |key|
+        value = found.delete key
+        new_key = key.shift
+        found[new_key] ||= {}
+        found[new_key][key] = value
+      end
     end
 
     found
@@ -117,22 +129,28 @@ class PDFKit
   end
 
   def preprocess_html
-    if @source.html?
-      processed_html = PDFKit::HTMLPreprocessor.process(@source.to_s, @root_url, @protocol)
-      @source = Source.new(processed_html)
+    @sources.map! do |source|
+      if source.html?
+        processed_html = PDFKit::HTMLPreprocessor.process(source.to_s, @root_url, @protocol)
+        Source.new(processed_html)
+      else
+        source
+      end
     end
   end
 
   def append_stylesheets
-    raise ImproperSourceError, 'Stylesheets may only be added to an HTML source' if stylesheets.any? && !@source.html?
+    raise ImproperSourceError, 'Stylesheets may only be added to an HTML source' if stylesheets.any? && !@sources.any?(&:html?)
 
     stylesheets.each do |stylesheet|
-      if @source.to_s.match(/<\/head>/)
-        @source = Source.new(@source.to_s.gsub(/(<\/head>)/) {|s|
-          style_tag_for(stylesheet) + (s.respond_to?(:html_safe) ? s.html_safe : s)
-        })
-      else
-        @source.to_s.insert(0, style_tag_for(stylesheet))
+      @sources.map! do |source|
+        if source.to_s.match(/<\/head>/)
+          Source.new(source.to_s.gsub(/(<\/head>)/) {|s|
+            style_tag_for(stylesheet) + (s.respond_to?(:html_safe) ? s.html_safe : s)
+          })
+        else
+          Source.new(source.to_s.insert(0, style_tag_for(stylesheet)))
+        end
       end
     end
   end
