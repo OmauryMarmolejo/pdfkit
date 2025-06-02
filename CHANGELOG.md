@@ -1,3 +1,9 @@
+2025-06-02
+=================
+  * Add support for multiple sources in PDF generation
+  * Modify PDFKit to handle an array of HTML strings, URLs, and files
+  * Maintain backward compatibility with single source usage
+
 2023-02-27
 =================
   * Bump to 0.8.7.3
